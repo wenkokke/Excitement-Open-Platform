@@ -31,10 +31,11 @@
 		<module>biutee</module>
 		<module>util</module>
 		<module>redis</module>
+		<module>semante</module>
 		<module>distsim</module>
 		<module>globalgraphoptimizer</module>
 		<module>lexicalinferenceminer</module>
-                <module>alignmentedas</module> 
+        <module>alignmentedas</module> 
 	</modules>
 
         <profiles>

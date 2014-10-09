@@ -25,10 +25,13 @@ import eu.excitementproject.eop.common.representation.parse.tree.TreeAndParentMa
 import eu.excitementproject.eop.common.representation.parse.tree.dependency.basic.BasicNode;
 import eu.excitementproject.eop.lap.biu.lemmatizer.Lemmatizer;
 import eu.excitementproject.eop.transformations.alignment.AlignmentCalculator;
+import eu.excitementproject.eop.transformations.generic.truthteller.AnnotatorException;
+import eu.excitementproject.eop.transformations.operations.OperationException;
 import eu.excitementproject.eop.transformations.representation.ExtendedInfo;
 import eu.excitementproject.eop.transformations.representation.ExtendedNode;
 import eu.excitementproject.eop.transformations.utilities.SingleTreeEvaluations;
 import eu.excitementproject.eop.transformations.utilities.TeEngineMlException;
+import eu.excitementproject.semante.Prover;
 
 /**
  * Contain methods used by {@link LLGSTextTreesProcessor}.<BR>
@@ -55,6 +58,25 @@ public class LocalCreativeTextTreesProcessor extends LLGSTextTreesProcessor
 				coreferenceInformation, classifier, lemmatizer, script,
 				teSystemEnvironment);
 	}
+	
+	
+	//////////////// MODIFICATIONS FOR BIUTEEPLUS /////////////////////
+	
+	/**
+     * This field will hold an instance of {@link Prover}, which is the entry point to
+     * the SemAnTE pipeline, specialised to a particular hypothesis.
+     */
+    private Prover semanteProver;
+	    
+    @Override
+    protected void init() throws TeEngineMlException, OperationException, AnnotatorException, TreeAndParentMapException
+    {
+            super.init();
+
+            // Initialises the SemAnTE prover
+            this.semanteProver = new Prover(operationsEnvironment.getHypothesis());
+    }
+
 	
 	//////////////// PROTECTED & PRIVATE /////////////////////
 	
