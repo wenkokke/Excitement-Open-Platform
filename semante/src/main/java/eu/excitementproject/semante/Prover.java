@@ -2,13 +2,16 @@ package eu.excitementproject.semante;
 
 import java.io.IOException;
 
+import semante.parser.Node;
+import semante.parser.Token;
+import semante.util.ASTree;
 import eu.excitementproject.eop.common.representation.parse.tree.TreeAndParentMap;
 import eu.excitementproject.eop.transformations.representation.ExtendedInfo;
 import eu.excitementproject.eop.transformations.representation.ExtendedNode;
 
 public final class Prover {
 	
-	private ConTree hypothesis = null;
+	private ASTree<Node, Token> hypothesis = null;
 	
 	/**
 	 * Set the hypothesis tree using the external dep2con utility to convert it
@@ -20,7 +23,6 @@ public final class Prover {
 	public Prover(final TreeAndParentMap<ExtendedInfo, ExtendedNode> hypothesis) {
 		try {
 			this.hypothesis = Dep2Con.dep2con(hypothesis.getTree());
-			System.out.println(this.hypothesis);
 		}
 		catch (Dep2ConException e) {
 			System.err.println("SemAnTE: " + e.getMessage());
@@ -34,6 +36,10 @@ public final class Prover {
 	 * @return
 	 */
 	public final boolean isHypothesisAllowedBy(final TreeAndParentMap<ExtendedInfo, ExtendedNode> text) {
+		if (this.hypothesis == null) {
+			System.err.println("SemAnTE: null hypothesis");
+			return false;
+		}
 		return false;
 	}
 	

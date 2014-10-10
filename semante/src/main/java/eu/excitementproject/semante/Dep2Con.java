@@ -13,13 +13,26 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import lombok.Cleanup;
 import lombok.val;
+import lombok.experimental.NonFinal;
 
 import org.codehaus.jparsec.Parser;
 import org.codehaus.jparsec.functors.Map2;
 import org.codehaus.jparsec.functors.Map5;
+
+import semante.parser.Dependency;
+import semante.parser.Node;
+import semante.parser.Token;
+import semante.util.ASTree;
+import semante.util.ASTree.Visitor;
+import semante.util.Pair;
+import semante.util.impl.IPair;
+
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 import eu.excitementproject.eop.transformations.representation.ExtendedNode;
 
@@ -30,21 +43,40 @@ public final class Dep2Con {
 	 */
 	private static final String DEP2CON = "/usr/local/bin/dep2con";
 	
-	public static final void main(String[] args) throws Dep2ConException {
-		val input = 
-				"(\"ROOT\"/\"ROOT\"/0 (\"led\"/\"VBD\"/3"
-				+ " (\"band\"/\"NN\"/2 \"the\"/\"DT\"/1)"
-				+ " (\"form\"/\"VBN\"/6 \"zeppelin\"/\"NNP\"/4 \"be\"/\"VBD\"/5"
-				+ " (\"in\"/\"IN\"/7 \"1980\"/\"CD\"/8)) \".\"/\".\"/9))";
-		System.err.println(input);
-		val output = dep2con(input);
-		System.err.println(output);
-		System.err.println(pConTree.parse(output));
-	}
-	
-	public static final ConTree dep2con(ExtendedNode tree) throws Dep2ConException {
-		System.err.println(show(tree).replaceAll("\"", "\\\\\""));
-		return pConTree.parse(dep2con(show(tree)));
+	public static final ASTree<Node, Token> dep2con(ExtendedNode depTree) throws Dep2ConException {
+		
+		val stringAndInfo = showAndGatherInfo(depTree);
+		val string        = stringAndInfo.getFirst();
+		val infoMap       = stringAndInfo.getSecond();
+				
+		return parse(dep2con(string)).accept(
+			new Visitor<String, String, ASTree<Node, Token>>() {
+
+				private @NonFinal int index = 0;
+				private static final long serialVersionUID = -2885768485341951281L;
+
+				@Override
+				public final ASTree<Node, Token> leaf(String id) {
+					val info = (TokenImpl) infoMap.get(id);
+					info.setId(index++);
+					return new ASTreeImpl.ASLeafImpl<Node, Token>(info);
+				}
+
+				@Override
+				public final ASTree<Node, Token> node(
+						String pos, List<ASTree<String, String>> children) {
+					
+					val builder = ImmutableList.<ASTree<Node, Token>> builder();
+					for (val child : children) {
+						builder.add(child.accept(this));
+					}					
+					return new ASTreeImpl.ASNodeImpl<Node, Token>(
+						new IdAndPos(index++, pos), builder.build()
+					);
+				}
+				
+			}
+		);
  	}
 	
 	public static final String dep2con(String input) throws Dep2ConException {
@@ -104,32 +136,36 @@ public final class Dep2Con {
 	////////// PARSE TREES //////////
 	
 	
-	private static final Parser<ConTree> pConTree = mkPConTree();
+	private static final ASTree<String,String> parse(String tree) {
+		return pASTree.parse(tree);
+	}
 	
-	private static final Parser<ConTree> mkPConTree() {
-		val pRef = Parser.<ConTree> newReference();
+	private static final Parser<ASTree<String,String>> pASTree = mkPASTree();
+	
+	private static final Parser<ASTree<String,String>> mkPASTree() {
+		val pRef = Parser.<ASTree<String,String>> newReference();
 		val pLeaf = sequence
 				( DOUBLE_QUOTE_STRING
 				, isChar('/')
 				, DOUBLE_QUOTE_STRING
 				, isChar('/')
 				, INTEGER
-				, new Map5<String,Void,String,Void,String,ConTree>() {
+				, new Map5<String,Void,String,Void,String,ASTree<String,String>>() {
 					
 				@Override
-				public final ConTree map(
-					String word, Void _1, String pos, Void _2, String serial) {
-					return new ConTree.Leaf(word, pos, Integer.valueOf(serial));
+				public final ASTree<String,String> map(
+					String id, Void _1, String pos, Void _2, String serial) {
+					return new ASTreeImpl.ASLeafImpl<String,String>(id);
 				}
 		}).followedBy(WHITESPACES.skipMany());
 		val pNode = sequence
 				( DOUBLE_QUOTE_STRING.followedBy(WHITESPACES.skipMany1())
 				, pRef.lazy().many()
-				, new Map2<String, List<ConTree>, ConTree>() {
+				, new Map2<String, List<ASTree<String,String>>, ASTree<String,String>>() {
 
 				@Override
-				public ConTree map(String pos, List<ConTree> children) {
-					return new ConTree.Node(pos, children);
+				public ASTree<String,String> map(String pos, List<ASTree<String,String>> children) {
+					return new ASTreeImpl.ASNodeImpl<String,String>(pos, children);
 				}
 					
 				}).between(isChar('('), isChar(')'))
@@ -141,41 +177,76 @@ public final class Dep2Con {
 	
 	
 	////////// PRINT TREES ////////// 
-	
-	
-	// print a tree in the format required by dep2con.
-	private static final String show(ExtendedNode tree) {
+
+	private static final Pair<String,Map<String,Token>> showAndGatherInfo(ExtendedNode tree) {
 		
-		val wordInfo = tree.getInfo().getNodeInfo().getWordLemma();
-		val word     = quoteString(wordInfo == null ? "ROOT" : wordInfo); 
+		// CREATE STRING REPRESENTATION
+		
+		val id       = quoteString(tree.getInfo().getId()); 
 		val posInfo  = tree.getInfo().getNodeInfo().getSyntacticInfo().getPartOfSpeech();
 		val pos      = quoteString(posInfo == null ? "ROOT" : posInfo.getStringRepresentation()); 
 		val serial   = tree.getInfo().getNodeInfo().getSerial();	
-		val repr     = String.format("%s/%s/%d", word, pos, serial);
+		val string   = String.format("%s/%s/%d", id, pos, serial);
+		
+		// CREATE ID-MAP
+		
+		val infoMap  = ImmutableMap.<String, Token> builder();
+		val nodeInfo = tree.getInfo().getNodeInfo();
+		val nerTag   = nodeInfo.getNamedEntityAnnotation();
+		val posTag   = nodeInfo.getSyntacticInfo().getPartOfSpeech();
+		val depMap   = ImmutableMap.<Token,Dependency> builder();
+		val current  = new TokenImpl
+			( -1
+			, nodeInfo.getWordLemma()
+			, nerTag == null ? "" : nerTag.name()
+			, posTag == null ? "" : posTag.getStringRepresentation()
+			, ""
+			, nodeInfo.getWord()
+			, null
+			);
+		infoMap.put(id, current);
+		
+		// RECURSIVE CALLS
 		
 		if (tree.hasChildren()) {
 			val builder = new StringBuilder();
 			builder.append('(');
-			builder.append(repr);
+			builder.append(string);
 			for (val child : tree.getChildren())
 			{
+				val stringAndInfo = showAndGatherInfo(child);
 				builder.append(' ');
-				builder.append(show(child));
+				builder.append(stringAndInfo.getFirst());
+				
+				// update the info map.
+				infoMap.putAll(stringAndInfo.getSecond());
+				
+				// update the dependency map.
+				depMap.put(
+					stringAndInfo.getSecond().get(child.getInfo().getId()),
+					new DependencyImpl(child.getInfo().getEdgeInfo().getDependencyRelation().getStringRepresentation())
+				);
 			}
 			builder.append(')');
-			return builder.toString();
+			
+			// insert the dependency map.
+			current.setDependencies(depMap.build());
+			
+			return pair(builder.toString(), (Map<String,Token>) infoMap.build());
 		}
 		else {
-			return repr;
+			return pair(string, (Map<String,Token>) infoMap.build());
 		}
 	}
 	
-	// wraps quotes around and escape quotes in a string.
 	private static final String quoteString(String str) {
 		return '"' + str.replaceAll("\"", "\\\"") + '"';
 	}
 	
-	// prohibit construction of this class.
+	private static final <A,B> Pair<A,B> pair(A fst, B snd) {
+		return new IPair<A,B>(fst, snd);
+	}
+	
 	private Dep2Con() {}
 	
 }
